@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -30,6 +31,9 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .api-key-saved {
+            color: #16a34a; /* green-600 */
+        }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 flex items-center justify-center min-h-screen p-4">
@@ -37,11 +41,23 @@
     <div class="w-full max-w-lg bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8">
         <div class="text-center">
             <h1 class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">AI Fruit Quality Inspector</h1>
-            <p class="text-gray-500 dark:text-gray-400 mt-2">Upload a picture of a fruit to check its quality and get recipe ideas.</p>
+            <p class="text-gray-500 dark:text-gray-400 mt-2">Upload a picture of a fruit to check its quality.</p>
+        </div>
+
+        <!-- API Key Input -->
+        <div class="mt-8">
+            <label for="api-key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Google AI API Key</label>
+            <div class="mt-1 relative rounded-md shadow-sm">
+                <input type="password" id="api-key" class="block w-full p-3 border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter your API key">
+            </div>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Get your free key from <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-600 hover:underline">Google AI Studio</a>.
+                <span id="api-key-status" class="ml-2"></span>
+            </p>
         </div>
 
         <!-- File Upload Area -->
-        <div class="mt-8">
+        <div class="mt-6">
             <label for="file-upload" class="drop-zone w-full p-8 text-center rounded-lg cursor-pointer block" id="drop-zone">
                 <div class="flex flex-col items-center justify-center">
                     <svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-4-4V6a4 4 0 014-4h10a4 4 0 014 4v6a4 4 0 01-4 4H7z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
@@ -68,29 +84,14 @@
         <div id="result-container" class="mt-6 text-center hidden">
             <div id="loader" class="loader mx-auto hidden"></div>
             <div id="result-text" class="text-lg font-semibold p-4 rounded-lg"></div>
-            <p id="result-explanation" class="text-sm text-gray-500 dark:text-gray-400 mt-2"></p>
+             <p id="result-explanation" class="text-sm text-gray-500 dark:text-gray-400 mt-2"></p>
         </div>
-        
-        <!-- Recipe Suggestion Button -->
-        <div id="recipe-button-container" class="mt-4 hidden">
-            <button id="suggest-recipe-button" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-400 disabled:cursor-not-allowed">
-                ✨ Suggest Recipe
-            </button>
-        </div>
-
-        <!-- Recipe Display -->
-        <div id="recipe-container" class="mt-6 hidden">
-            <div id="recipe-loader" class="loader mx-auto"></div>
-            <div id="recipe-content" class="text-left p-4 bg-gray-50 dark:bg-gray-700 rounded-lg hidden">
-                 <h3 class="font-bold text-lg mb-2 text-gray-900 dark:text-white">Recipe Idea:</h3>
-                 <div id="recipe-text" class="text-gray-700 dark:text-gray-300 whitespace-pre-wrap"></div>
-            </div>
-        </div>
-
     </div>
 
     <script>
         // --- DOM Element References ---
+        const apiKeyInput = document.getElementById('api-key');
+        const apiKeyStatus = document.getElementById('api-key-status');
         const fileUpload = document.getElementById('file-upload');
         const dropZone = document.getElementById('drop-zone');
         const imagePreviewContainer = document.getElementById('image-preview-container');
@@ -100,113 +101,105 @@
         const loader = document.getElementById('loader');
         const resultText = document.getElementById('result-text');
         const resultExplanation = document.getElementById('result-explanation');
-        const recipeButtonContainer = document.getElementById('recipe-button-container');
-        const suggestRecipeButton = document.getElementById('suggest-recipe-button');
-        const recipeContainer = document.getElementById('recipe-container');
-        const recipeLoader = document.getElementById('recipe-loader');
-        const recipeContent = document.getElementById('recipe-content');
-        const recipeText = document.getElementById('recipe-text');
 
         // --- State Variables ---
         let imageData = null;
         let fileMimeType = null;
-        let identifiedFruit = null;
 
         // --- Initial State Setup ---
-        analyzeButton.disabled = true;
+        function checkCanAnalyze() {
+            analyzeButton.disabled = !(imageData && apiKeyInput.value.trim());
+        }
+        
+        // Load API key from localStorage on page load
+        window.addEventListener('load', () => {
+            const savedApiKey = localStorage.getItem('geminiApiKey');
+            if (savedApiKey) {
+                apiKeyInput.value = savedApiKey;
+                apiKeyStatus.textContent = 'Key loaded from memory.';
+                apiKeyStatus.classList.add('api-key-saved');
+            }
+            checkCanAnalyze();
+        });
+        
+        // Save API key to localStorage when it changes
+        apiKeyInput.addEventListener('input', () => {
+            const key = apiKeyInput.value.trim();
+            if (key) {
+                localStorage.setItem('geminiApiKey', key);
+                apiKeyStatus.textContent = 'Key saved for this session.';
+                apiKeyStatus.classList.add('api-key-saved');
+            } else {
+                localStorage.removeItem('geminiApiKey');
+                apiKeyStatus.textContent = '';
+                apiKeyStatus.classList.remove('api-key-saved');
+            }
+            checkCanAnalyze();
+        });
 
         // --- Drag and Drop Event Handlers ---
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            dropZone.classList.add('drag-over');
-        });
-
-        dropZone.addEventListener('dragleave', (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('drag-over');
-        });
-
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); });
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('drag-over');
             const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFile(files[0]);
-            }
+            if (files.length > 0) handleFile(files[0]);
         });
 
         // --- File Input Event Handler ---
         fileUpload.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFile(e.target.files[0]);
-            }
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
         });
 
-        /**
-         * Handles the selected file by reading it and displaying a preview.
-         * @param {File} file The file selected by the user.
-         */
         function handleFile(file) {
             if (!file.type.startsWith('image/')) {
                 alert('Please upload an image file.');
                 return;
             }
-
             fileMimeType = file.type;
-
             const reader = new FileReader();
             reader.onload = (e) => {
                 imagePreview.src = e.target.result;
                 imagePreviewContainer.classList.remove('hidden');
                 imageData = e.target.result.split(',')[1];
-                analyzeButton.disabled = false;
-                // Hide previous results on new file upload
-                resultContainer.classList.add('hidden'); 
-                recipeButtonContainer.classList.add('hidden');
-                recipeContainer.classList.add('hidden');
+                resultContainer.classList.add('hidden');
+                checkCanAnalyze();
             };
             reader.readAsDataURL(file);
         }
 
-        // --- Button Click Handlers ---
+        // --- Analyze Button Click Handler ---
         analyzeButton.addEventListener('click', analyzeImage);
-        suggestRecipeButton.addEventListener('click', getRecipeSuggestion);
         
-        /**
-         * Calls the Gemini API to analyze the uploaded fruit image.
-         */
         async function analyzeImage() {
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) {
+                alert("Please enter your Google AI API key.");
+                return;
+            }
             if (!imageData) {
                 alert("Please upload an image first.");
                 return;
             }
 
-            // --- Reset UI for new analysis ---
             resultContainer.classList.remove('hidden');
             loader.classList.remove('hidden');
             resultText.classList.add('hidden');
             resultExplanation.textContent = '';
-            recipeButtonContainer.classList.add('hidden');
-            recipeContainer.classList.add('hidden');
             analyzeButton.disabled = true;
 
-            // --- Construct the API request payload ---
-            const prompt = `You are an expert in fruit quality control. Analyze the fruit in this image.
-1. On the first line, identify the fruit (e.g., "Apple", "Banana").
-2. On the second line, determine its state with one of the following words: FRESH, ROTTEN, or UNCERTAIN.
-3. On the third line, provide a brief, one-sentence explanation for your assessment.`;
+            const prompt = `You are an expert in fruit quality control. Analyze the fruit in this image. 
+            First, on one line, determine its state with one of the following words: FRESH, ROTTEN, or UNCERTAIN.
+            Then, on a new line, provide a brief, one-sentence explanation for your assessment.`;
 
             const payload = {
                 contents: [{
                     role: "user",
-                    parts: [
-                        { text: prompt },
-                        { inlineData: { mimeType: fileMimeType, data: imageData } }
-                    ]
+                    parts: [{ text: prompt }, { inlineData: { mimeType: fileMimeType, data: imageData } }]
                 }],
             };
 
-            const apiKey = ""; // This will be handled by the environment
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
             try {
@@ -216,47 +209,43 @@
                     body: JSON.stringify(payload)
                 });
 
-                if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+                if (!response.ok) {
+                    const errorBody = await response.json();
+                    const errorMessage = errorBody?.error?.message || `API request failed with status ${response.status}`;
+                    throw new Error(errorMessage);
+                }
                 
                 const result = await response.json();
-
-                if (result.candidates?.[0]?.content?.parts?.[0]) {
+                if (result.candidates && result.candidates[0].content?.parts?.[0]) {
                     const responseText = result.candidates[0].content.parts[0].text;
-                    const lines = responseText.trim().split('\n').map(line => line.replace(/^\d+\.\s*/, '').trim());
-                    
-                    const [fruit, status, explanation] = lines;
-                    identifiedFruit = fruit;
-                    displayResult(status.toUpperCase(), explanation, fruit);
+                    const [status, ...explanationParts] = responseText.trim().split('\n');
+                    const explanation = explanationParts.join(' ').trim();
+                    displayResult(status.trim().toUpperCase(), explanation);
+                } else if (result.candidates?.[0]?.finishReason === 'SAFETY') {
+                    displayResult('REJECTED', 'The image was rejected for safety reasons.');
                 } else {
                     console.error("Unexpected API response structure:", result);
-                    displayResult('ERROR', 'Could not analyze the image due to an unexpected response from the AI.');
+                    displayResult('ERROR', 'Could not parse the AI response.');
                 }
-
             } catch (error) {
                 console.error('Error during API call:', error);
-                displayResult('ERROR', 'An error occurred while contacting the AI service.');
+                displayResult('ERROR', error.message);
             } finally {
                 loader.classList.add('hidden');
-                analyzeButton.disabled = false;
+                checkCanAnalyze();
             }
         }
 
-        /**
-         * Displays the analysis result on the UI.
-         * @param {string} status The status from the AI (e.g., 'FRESH', 'ROTTEN').
-         * @param {string} explanation The explanation from the AI.
-         * @param {string} fruit The name of the identified fruit.
-         */
-        function displayResult(status, explanation, fruit) {
-            resultText.classList.remove('hidden', 'bg-green-100', 'text-green-800', 'dark:bg-green-900', 'dark:text-green-200', 'bg-red-100', 'text-red-800', 'dark:bg-red-900', 'dark:text-red-200', 'bg-yellow-100', 'text-yellow-800', 'dark:bg-yellow-900', 'dark:text-yellow-200', 'bg-gray-100', 'text-gray-800', 'dark:bg-gray-700', 'dark:text-gray-200');
+        function displayResult(status, explanation) {
+            resultText.className = 'text-lg font-semibold p-4 rounded-lg'; // Reset classes
+            resultText.classList.remove('hidden');
             
-            resultText.textContent = `Fruit: ${fruit || 'Unknown'} | Status: ${status}`;
-            resultExplanation.textContent = explanation || '';
+            resultText.textContent = `Status: ${status}`;
+            resultExplanation.textContent = explanation;
 
             switch (status) {
                 case 'FRESH':
                     resultText.classList.add('bg-green-100', 'text-green-800', 'dark:bg-green-900', 'dark:text-green-200');
-                    recipeButtonContainer.classList.remove('hidden');
                     break;
                 case 'ROTTEN':
                     resultText.classList.add('bg-red-100', 'text-red-800', 'dark:bg-red-900', 'dark:text-red-200');
@@ -265,62 +254,8 @@
                      resultText.classList.add('bg-yellow-100', 'text-yellow-800', 'dark:bg-yellow-900', 'dark:text-yellow-200');
                     break;
                 default:
-                    resultText.textContent = `Status: ${status || 'ERROR'}`;
-                    resultText.classList.add('bg-gray-100', 'text-gray-800', 'dark:bg-gray-700', 'dark:text-gray-200');
+                    resultText.classList.add('bg-gray-200', 'text-gray-800', 'dark:bg-gray-700', 'dark:text-gray-200');
                     break;
-            }
-        }
-
-        /**
-         * Calls the Gemini API to get a recipe suggestion.
-         */
-        async function getRecipeSuggestion() {
-            if (!identifiedFruit) {
-                alert("Cannot suggest a recipe without knowing the fruit.");
-                return;
-            }
-
-            // --- Show loading state for recipe ---
-            recipeContainer.classList.remove('hidden');
-            recipeLoader.classList.remove('hidden');
-            recipeContent.classList.add('hidden');
-            suggestRecipeButton.disabled = true;
-
-            const prompt = `Provide a simple and delicious recipe idea for a fresh ${identifiedFruit}. The recipe should be easy to follow for a home cook. Format it with a title, a short description, a list of ingredients, and step-by-step instructions.`;
-
-            const payload = {
-                contents: [{ role: "user", parts: [{ text: prompt }] }],
-            };
-
-            const apiKey = ""; // This will be handled by the environment
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
-
-                const result = await response.json();
-                
-                if (result.candidates?.[0]?.content?.parts?.[0]) {
-                    const recipe = result.candidates[0].content.parts[0].text;
-                    recipeText.textContent = recipe;
-                    recipeContent.classList.remove('hidden');
-                } else {
-                    recipeText.textContent = "Could not generate a recipe at this time.";
-                    recipeContent.classList.remove('hidden');
-                }
-            } catch (error) {
-                console.error('Error fetching recipe:', error);
-                recipeText.textContent = "An error occurred while fetching the recipe.";
-                recipeContent.classList.remove('hidden');
-            } finally {
-                recipeLoader.classList.add('hidden');
-                suggestRecipeButton.disabled = false;
             }
         }
     </script>
