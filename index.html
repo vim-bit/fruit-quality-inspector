@@ -111,7 +111,6 @@
             analyzeButton.disabled = !(imageData && apiKeyInput.value.trim());
         }
         
-        // Load API key from localStorage on page load
         window.addEventListener('load', () => {
             const savedApiKey = localStorage.getItem('geminiApiKey');
             if (savedApiKey) {
@@ -122,7 +121,6 @@
             checkCanAnalyze();
         });
         
-        // Save API key to localStorage when it changes
         apiKeyInput.addEventListener('input', () => {
             const key = apiKeyInput.value.trim();
             if (key) {
@@ -202,37 +200,65 @@
 
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
+            // --- Retry Logic Implementation ---
+            const MAX_RETRIES = 3;
+            let delay = 2000; // 2 seconds
 
-                if (!response.ok) {
-                    const errorBody = await response.json();
-                    const errorMessage = errorBody?.error?.message || `API request failed with status ${response.status}`;
-                    throw new Error(errorMessage);
+            for (let i = 0; i < MAX_RETRIES; i++) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    // If response is 429 (Too Many Requests) or 503 (Service Unavailable), throw to retry
+                    if (response.status === 429 || response.status === 503) {
+                        const errorBody = await response.json().catch(() => ({})); // Catch if body is not valid JSON
+                        const errorMessage = errorBody?.error?.message || `Model is busy (status ${response.status}). Retrying...`;
+                        throw new Error(errorMessage);
+                    }
+
+                    if (!response.ok) {
+                        const errorBody = await response.json().catch(() => ({}));
+                        const errorMessage = errorBody?.error?.message || `API request failed with status ${response.status}`;
+                        throw new Error(errorMessage); // Throw a permanent error for other issues
+                    }
+                    
+                    const result = await response.json();
+                    if (result.candidates && result.candidates[0].content?.parts?.[0]) {
+                        const responseText = result.candidates[0].content.parts[0].text;
+                        const [status, ...explanationParts] = responseText.trim().split('\n');
+                        const explanation = explanationParts.join(' ').trim();
+                        displayResult(status.trim().toUpperCase(), explanation);
+                    } else if (result.candidates?.[0]?.finishReason === 'SAFETY') {
+                        displayResult('REJECTED', 'The image was rejected for safety reasons.');
+                    } else {
+                        console.error("Unexpected API response structure:", result);
+                        displayResult('ERROR', 'Could not parse the AI response.');
+                    }
+                    
+                    // If successful, break the loop
+                    loader.classList.add('hidden');
+                    checkCanAnalyze();
+                    return;
+
+                } catch (error) {
+                    console.error(`Attempt ${i + 1} failed:`, error.message);
+                    
+                    // If this was the last attempt, show the final error
+                    if (i === MAX_RETRIES - 1) {
+                        displayResult('ERROR', `Failed after ${MAX_RETRIES} attempts: ${error.message}`);
+                        loader.classList.add('hidden');
+                        checkCanAnalyze();
+                        return;
+                    }
+
+                    // Update UI to show retry attempt and wait
+                    resultExplanation.textContent = `Model is busy. Retrying in ${delay / 1000}s... (${i + 2}/${MAX_RETRIES})`;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // Exponential backoff: wait longer for the next retry
                 }
-                
-                const result = await response.json();
-                if (result.candidates && result.candidates[0].content?.parts?.[0]) {
-                    const responseText = result.candidates[0].content.parts[0].text;
-                    const [status, ...explanationParts] = responseText.trim().split('\n');
-                    const explanation = explanationParts.join(' ').trim();
-                    displayResult(status.trim().toUpperCase(), explanation);
-                } else if (result.candidates?.[0]?.finishReason === 'SAFETY') {
-                    displayResult('REJECTED', 'The image was rejected for safety reasons.');
-                } else {
-                    console.error("Unexpected API response structure:", result);
-                    displayResult('ERROR', 'Could not parse the AI response.');
-                }
-            } catch (error) {
-                console.error('Error during API call:', error);
-                displayResult('ERROR', error.message);
-            } finally {
-                loader.classList.add('hidden');
-                checkCanAnalyze();
             }
         }
 
